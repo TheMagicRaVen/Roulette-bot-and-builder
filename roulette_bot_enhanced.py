@@ -377,11 +377,9 @@ class RouletteBot:
         
     def track_profit_loss(self, profit_change):
         self.round_count += 1
-        print(f"[!] Graph Debug: RECEIVED profit_change=${profit_change:.2f}, current total_profit=${self.total_profit:.2f}")
         self.total_profit += profit_change
         self.profit_history.append(self.total_profit)
         self.round_history.append(self.round_count)
-        print(f"[!] Graph Debug: UPDATED total_profit=${self.total_profit:.2f}, Round {self.round_count}")
         
         # Update GUI label immediately if available
         if hasattr(self, 'stat_label') and self.stat_label:
@@ -399,7 +397,6 @@ class RouletteBot:
             self.profit_history = self.profit_history[-200:]
             self.round_history = self.round_history[-200:]
         
-        print(f"[!] Graph Debug: History size: {len(self.profit_history)} points")
             
     def update_gui(self):
         """Update GUI with latest data"""
@@ -447,7 +444,13 @@ class RouletteBot:
                 y_min = current_profit - 5
                 y_max = current_profit + 5
                 
-                # Ensure 0-line is always visible when close to zero
+                # ALWAYS ensure 0-line is visible in the range
+                if y_min > 0:
+                    y_min = -2  # Show some negative space to include 0
+                if y_max < 0:
+                    y_max = 2   # Show some positive space to include 0
+                
+                # Special case: when close to zero, show balanced range
                 if abs(current_profit) < 5:
                     y_min, y_max = -5, 5
                 
@@ -537,90 +540,71 @@ class RouletteBot:
         reds = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
         blacks = [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]
         
-        print(f"[!] Debug: check_win called with number {n}")
         
         for bet in strategy_bets:
             s = str(bet['square']).lower()
-            print(f"[!] Debug: Checking bet '{s}' against number {n}")
             
             # Direct number match
             if str(n) == s: 
-                print(f"[!] Debug: DIRECT MATCH - {s} == {n} = WIN")
                 return True
             
             # Outside bets
             if s == "red" and n in reds: 
-                print(f"[!] Debug: RED BET - {s} WIN (number {n} is red)")
                 return True
             if s == "black" and n in blacks: 
-                print(f"[!] Debug: BLACK BET - {s} WIN (number {n} is black)")
                 return True
             if s == "even" and n != 0 and n % 2 == 0: 
-                print(f"[!] Debug: EVEN BET - {s} WIN (number {n} is even)")
                 return True
             if s == "odd" and n % 2 != 0: 
-                print(f"[!] Debug: ODD BET - {s} WIN (number {n} is odd)")
                 return True
             if s == "low" or s == "1-18": 
                 if 1 <= n <= 18:
-                    print(f"[!] Debug: LOW BET - {s} WIN (number {n} is low)")
                     return True
             if s == "high" or s == "19-36": 
                 if 19 <= n <= 36:
-                    print(f"[!] Debug: HIGH BET - {s} WIN (number {n} is high)")
                     return True
             
             # Dozen bets
             if s in ["dozen-1", "dozen-2", "dozen-3", "1st 12", "2nd 12", "3rd 12"]:
                 if s in ["dozen-1", "1st 12"]:
                     if 1 <= n <= 12:
-                        print(f"[!] Debug: DOZEN-1 BET - {s} WIN (number {n} is in 1-12)")
                         return True
                 elif s in ["dozen-2", "2nd 12"]:
                     if 13 <= n <= 24:
-                        print(f"[!] Debug: DOZEN-2 BET - {s} WIN (number {n} is in 13-24)")
                         return True
                 elif s in ["dozen-3", "3rd 12"]:
                     if 25 <= n <= 36:
-                        print(f"[!] Debug: DOZEN-3 BET - {s} WIN (number {n} is in 25-36)")
                         return True
             
             # Street bets (e.g., "street-1-2-3")
             if s.startswith('street-'):
                 numbers = s.replace('street-', '').split('-')
                 if str(n) in numbers: 
-                    print(f"[!] Debug: STREET BET - {s} WIN (number {n} is in {numbers})")
                     return True
             
             # Double street bets (e.g., "double-street-4-5-6-7-8-9")
             if s.startswith('double-street-'):
                 numbers = s.replace('double-street-', '').split('-')
                 if str(n) in numbers: 
-                    print(f"[!] Debug: DOUBLE-STREET BET - {s} WIN (number {n} is in {numbers})")
-                    return True
+                                        return True
             # Handle double street bets with underscores (config file naming)
             elif s.startswith('double_street_'):
                 numbers = s.replace('double_street_', '').split('_')
                 if str(n) in numbers: 
-                    print(f"[!] Debug: DOUBLE-STREET BET - {s} WIN (number {n} is in {numbers})")
-                    return True
+                                        return True
                     
             # Column bets
             if s in ["col-1", "col-2", "col-3", "col1", "col2", "col3"]:
                 if s in ["col-1", "col1"]:
                     if n % 3 == 1 and 1 <= n <= 36:
-                        print(f"[!] Debug: COLUMN-1 BET - {s} WIN (number {n} is in column 1)")
                         return True
                 elif s in ["col-2", "col2"]:
                     if n % 3 == 2 and 1 <= n <= 36:
-                        print(f"[!] Debug: COLUMN-2 BET - {s} WIN (number {n} is in column 2)")
                         return True
                 elif s in ["col-3", "col3"]:
                     if n % 3 == 0 and 1 <= n <= 36:
-                        print(f"[!] Debug: COLUMN-3 BET - {s} WIN (number {n} is in column 3)")
                         return True
                 else:
-                    print(f"[!] Debug: Unknown column bet type: {s}")
                     return False
 
         return False
