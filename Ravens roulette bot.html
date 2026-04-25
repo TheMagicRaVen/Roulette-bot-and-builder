@@ -1,4 +1,4 @@
-﻿
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8921,14 +8921,49 @@ function runSandboxSimulation() {
 }
 
 function resetSandboxSimulation() {
-  // Clear the sandbox output
+  // Clear sandbox output
   const outputDiv = document.getElementById('sandboxOutput');
   if (outputDiv) {
     outputDiv.innerHTML = '<div style="color: #00ff00; font-style: italic;">Simulation reset. Ready to run new simulation...</div>';
   }
   
-  // Reset sandbox state
+  // Reset sandbox state completely
   sandboxState.isRunning = false;
+  sandboxState.simulationData = [];
+  sandboxState.totalProfitLoss = 0;
+  sandboxState.wins = 0;
+  sandboxState.losses = 0;
+  sandboxState.biggestWin = 0;
+  sandboxState.biggestLoss = 0;
+  
+  // Clear summary statistics display
+  const totalPLElement = document.getElementById('sandboxTotalPL');
+  if (totalPLElement) {
+    totalPLElement.textContent = '$0.00';
+    totalPLElement.style.color = '#00ff00';
+  }
+  
+  const winRateElement = document.getElementById('sandboxWinRate');
+  if (winRateElement) {
+    winRateElement.textContent = '0%';
+    winRateElement.style.color = '#00ff00';
+  }
+  
+  const biggestWinElement = document.getElementById('sandboxBiggestWin');
+  if (biggestWinElement) {
+    biggestWinElement.textContent = '$0.00';
+  }
+  
+  const biggestLossElement = document.getElementById('sandboxBiggestLoss');
+  if (biggestLossElement) {
+    biggestLossElement.textContent = '$0.00';
+  }
+  
+  // Clear simulation info display
+  const infoDiv = document.getElementById('sandboxInfo');
+  if (infoDiv) {
+    infoDiv.innerHTML = '<div style="color: #ffaa00;">Results cleared. Ready to run new simulation...</div>';
+  }
   
   // Update button text
   const btn = document.getElementById('startSandboxBtn');
@@ -8936,9 +8971,6 @@ function resetSandboxSimulation() {
     btn.textContent = 'Run Simulation';
     btn.disabled = false;
   }
-  
-  // Update info to reflect reset state
-  updateSandboxInfo();
 }
 
 function getBetMultiplier(square) {
