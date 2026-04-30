@@ -1454,7 +1454,7 @@ btn.style.cssText {
       <div class="results-title">Recent Results</div>
       <div class="header-actions">
         <button id="ocrToggleBtn" class="btn btn-secondary" onclick="ocrIntegration.toggle()">Enable OCR</button>
-        <input type="file" id="importResultsFile" style="display: none;" accept=".json" onchange="importResultsData(event)">
+        <input type="file" id="importResultsFile" style="display: none;" accept=".json,.csv" onchange="importResultsData(event)">
         <button class="btn btn-primary" onclick="document.getElementById('importResultsFile').click()">Import Data</button>
         <button class="btn btn-primary" onclick="exportData()">Export Data</button>
         <button class="btn btn-danger" onclick="clearContainerResults()">Clear All</button>
@@ -1811,48 +1811,111 @@ btn.style.cssText {
         linkElement.click();
     }
 
-    function importResultsData(event) {
-        const file = event.target.files[0];
-        if (!file) return;
+    
+    function parseCSVResults(csvText) {
+        const lines = csvText.split('\n').filter(line => line.trim());
+        if (lines.length < 2) {
+            throw new Error('CSV file must have at least a header row and one data row');
+        }
         
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                const results = JSON.parse(e.target.result);
+        // Parse header to determine column structure
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+        
+        // Support both formats:
+        // Format 1: spin_index,pocket,colour
+        // Format 2: num,color,timestamp
+        
+        const results = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+            const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+            
+            if (values.length < 2) {
+                continue; // Skip invalid rows
+            }
+            
+            let num, color, timestamp;
+            
+            if (headers.includes('spin_index') && headers.includes('pocket') && headers.includes('colour')) {
+                // Handle user's format: spin_index,pocket,colour
+                const spinIndex = values[headers.indexOf('spin_index')];
+                num = values[headers.indexOf('pocket')];
+                color = values[headers.indexOf('colour')];
+                timestamp = Date.now(); // Use current time since timestamp not provided
                 
-                // Validate that it's an array of results
-                if (!Array.isArray(results)) {
-                    throw new Error('Invalid file format: Expected array of results');
+                // Validate the result
+                if (num === '' || color === '') {
+                    continue; // Skip empty rows
                 }
                 
-                // Optional: Validate each result has required fields
-                for (let result of results) {
-                    if (!result.hasOwnProperty('num') || !result.hasOwnProperty('color')) {
-                        throw new Error('Invalid result format: Missing required fields (num, color)');
+                // Convert num to number, but keep 0 and 00 as strings
+                let parsedNum;
+                if (num === '00') {
+                    parsedNum = '00';
+                } else if (num === '0') {
+                    parsedNum = 0;
+                } else {
+                    parsedNum = parseInt(num);
+                    if (isNaN(parsedNum)) {
+                        continue; // Skip invalid numbers
                     }
                 }
+                // Validate color
+                const validColors = ['red', 'black', 'green'];
+                if (!validColors.includes(color.toLowerCase())) {
+                    throw new Error(`Invalid color "${color}" in row ${i + 1}. Must be red, black, or green.`);
+                }
                 
-                // Replace current results with imported data
-                state.results = results;
+                results.push({
+                    num: parsedNum,
+                    color: color.toLowerCase(),
+                    timestamp: timestamp
+                });
                 
-                // Save to localStorage
-                saveResults();
+            } else if (headers.includes('num') && headers.includes('color')) {
+                // Handle original format: num,color,timestamp
+                num = values[headers.indexOf('num')];
+                color = values[headers.indexOf('color')];
+                timestamp = values[headers.indexOf('timestamp')] ? parseInt(values[headers.indexOf('timestamp')]) : Date.now();
                 
-                // Update displays
-                updateContainerResultsDisplay();
-                updateTrackerFromResults();
+                // Validate the result
+                if (num === '' || color === '') {
+                    continue; // Skip empty rows
+                }
                 
-                alert('Results imported successfully!');
+                // Convert num to number, but keep 0 and 00 as strings
+                let parsedNum;
+                if (num === '00') {
+                    parsedNum = '00';
+                } else if (num === '0') {
+                    parsedNum = 0;
+                } else {
+                    parsedNum = parseInt(num);
+                    if (isNaN(parsedNum)) {
+                        continue; // Skip invalid numbers
+                    }
+                }
+                // Validate color
+                const validColors = ['red', 'black', 'green'];
+                if (!validColors.includes(color.toLowerCase())) {
+                    throw new Error(`Invalid color "${color}" in row ${i + 1}. Must be red, black, or green.`);
+                }
                 
-            } catch (error) {
-                console.error('Error importing results:', error);
-                alert('Error importing results: ' + error.message);
+                results.push({
+                    num: parsedNum,
+                    color: color.toLowerCase(),
+                    timestamp: timestamp
+                });
+            } else {
+                throw new Error(`Unsupported CSV format. Expected headers: spin_index,pocket,colour or num,color,timestamp`);
             }
-        };
+        }
         
-        reader.readAsText(file);
-        // Reset the file input so the same file can be selected again if needed
-        event.target.value = '';
+        if (results.length === 0) {
+            throw new Error('No valid results found in CSV file');
+        }
+        
+        return results;
     }
 
     // Tracker Container Functions
@@ -7527,34 +7590,63 @@ function importResultsData(event) {
     const file = event.target.files[0];
     if (!file) return;
     
+    console.log('Importing file:', file.name, 'Size:', file.size, 'Type:', file.type);
+    
     const reader = new FileReader();
     reader.onload = function(e) {
         try {
-            const data = JSON.parse(e.target.result);
+            const fileExtension = file.name.split('.').pop().toLowerCase();
+            const content = e.target.result.trim();
+            console.log('File extension detected:', fileExtension);
+            console.log('File name:', file.name);
+            console.log('File content preview:', content.substring(0, 200));
             
-            // Handle different data formats
-            let results = [];
+            let results;
             
-            if (Array.isArray(data)) {
-                // Direct array of results
-                results = data;
-            } else if (data.results && Array.isArray(data.results)) {
-                // Object with results array
-                results = data.results;
-            } else if (data.strategies && Array.isArray(data.strategies)) {
-                // Strategy format - extract from strategies
-                // For now, just show error for strategy import
-                alert('This appears to be a strategy file, not a results file. Please use the strategy dropdown to load strategies.');
-                return;
-            } else {
-                throw new Error('Unknown data format');
+            // Force CSV detection if file extension is csv
+            if (fileExtension === 'csv') {
+                console.log('File extension is CSV, processing as CSV...');
+                // Handle CSV files
+                results = parseCSVResults(content);
+            }
+            // Try to detect if it's CSV by checking if content starts with header
+            else if (content.startsWith('num,') || content.startsWith('"num"')) {
+                console.log('Content starts with CSV header, processing as CSV...');
+                // Handle CSV files
+                results = parseCSVResults(content);
+            }
+            else if (content.startsWith('[') || content.startsWith('{')) {
+                console.log('Content starts with JSON marker, processing as JSON...');
+                // Handle JSON files
+                const data = JSON.parse(content);
+                
+                // Handle different data formats
+                if (Array.isArray(data)) {
+                    // Direct array of results
+                    results = data;
+                } else if (data.results && Array.isArray(data.results)) {
+                    // Object with results array
+                    results = data.results;
+                } else if (data.strategies && Array.isArray(data.strategies)) {
+                    // Strategy format - extract from strategies
+                    // For now, just show error for strategy import
+                    alert('This appears to be a strategy file, not a results file. Please use the strategy dropdown to load strategies.');
+                    return;
+                } else {
+                    throw new Error('Unknown JSON data format');
+                }
+            }
+            else {
+                console.log('Unknown file format, defaulting to CSV...');
+                // Default to CSV processing for safety
+                results = parseCSVResults(content);
             }
             
             // Validate and import results
             const validResults = results.filter(r => {
                 return r && (r.num !== undefined || r.number !== undefined) && r.color;
             }).map(r => ({
-                num: r.num || r.number,
+                num: r.num !== undefined ? r.num : r.number,
                 color: r.color,
                 timestamp: r.timestamp || Date.now(),
                 source: 'import'
@@ -7564,8 +7656,10 @@ function importResultsData(event) {
                 throw new Error('No valid results found in file');
             }
             
-            // Add to state.results
-            state.results.unshift(...validResults);
+            // Add to state.results (handle 0 correctly)
+            validResults.forEach(result => {
+                state.results.unshift(result);
+            });
             updateContainerResultsDisplay();
             saveResults();
             updateTrackerFromResults();
@@ -8680,7 +8774,7 @@ document.addEventListener('keydown', function(event) {
     border-bottom: 1px solid #555;
   ">
     <div class="sandbox-title" style="font-size: 18px; font-weight: bold; color: #00ff00;">
-      🎰 Strategy Simulator
+      🎰 Strategy Sandbox
     </div>
     <button onclick="toggleSandboxVisibility()" style="
       background: #dc3545;
@@ -8921,49 +9015,14 @@ function runSandboxSimulation() {
 }
 
 function resetSandboxSimulation() {
-  // Clear sandbox output
+  // Clear the sandbox output
   const outputDiv = document.getElementById('sandboxOutput');
   if (outputDiv) {
     outputDiv.innerHTML = '<div style="color: #00ff00; font-style: italic;">Simulation reset. Ready to run new simulation...</div>';
   }
   
-  // Reset sandbox state completely
+  // Reset sandbox state
   sandboxState.isRunning = false;
-  sandboxState.simulationData = [];
-  sandboxState.totalProfitLoss = 0;
-  sandboxState.wins = 0;
-  sandboxState.losses = 0;
-  sandboxState.biggestWin = 0;
-  sandboxState.biggestLoss = 0;
-  
-  // Clear summary statistics display
-  const totalPLElement = document.getElementById('sandboxTotalPL');
-  if (totalPLElement) {
-    totalPLElement.textContent = '$0.00';
-    totalPLElement.style.color = '#00ff00';
-  }
-  
-  const winRateElement = document.getElementById('sandboxWinRate');
-  if (winRateElement) {
-    winRateElement.textContent = '0%';
-    winRateElement.style.color = '#00ff00';
-  }
-  
-  const biggestWinElement = document.getElementById('sandboxBiggestWin');
-  if (biggestWinElement) {
-    biggestWinElement.textContent = '$0.00';
-  }
-  
-  const biggestLossElement = document.getElementById('sandboxBiggestLoss');
-  if (biggestLossElement) {
-    biggestLossElement.textContent = '$0.00';
-  }
-  
-  // Clear simulation info display
-  const infoDiv = document.getElementById('sandboxInfo');
-  if (infoDiv) {
-    infoDiv.innerHTML = '<div style="color: #ffaa00;">Results cleared. Ready to run new simulation...</div>';
-  }
   
   // Update button text
   const btn = document.getElementById('startSandboxBtn');
@@ -8971,6 +9030,9 @@ function resetSandboxSimulation() {
     btn.textContent = 'Run Simulation';
     btn.disabled = false;
   }
+  
+  // Update info to reflect reset state
+  updateSandboxInfo();
 }
 
 function getBetMultiplier(square) {
