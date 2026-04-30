@@ -8884,7 +8884,6 @@ function toggleSandboxVisibility() {
 }
 
 function updateSandboxInfo() {
-  console.log('updateSandboxInfo called!');
   const infoDiv = document.getElementById('sandboxInfo');
   
   if (!infoDiv) {
@@ -9030,7 +9029,39 @@ function runSandboxSimulation() {
   // Run simulation
   setTimeout(() => {
     const simulationResult = simulateStrategies(strategies, results, null);
-    displaySimulationResults(simulationResult);
+    
+    // Update UI elements directly
+    const totalPLElement = document.getElementById('sandboxTotalPL');
+    if (totalPLElement) {
+      const displayValue = simulationResult.totalPL >= 0 ? `+$${simulationResult.totalPL.toFixed(2)}` : `-$${Math.abs(simulationResult.totalPL).toFixed(2)}`;
+      totalPLElement.textContent = displayValue;
+      totalPLElement.style.color = simulationResult.totalPL >= 0 ? '#00ff00' : '#ff4444';
+    }
+    
+    const winRateElement = document.getElementById('sandboxWinRate');
+    if (winRateElement) {
+      const totalRounds = simulationResult.wins + simulationResult.losses;
+      const winRate = totalRounds > 0 ? (simulationResult.wins / totalRounds) * 100 : 0;
+      winRateElement.textContent = `${winRate.toFixed(1)}%`;
+      winRateElement.style.color = winRate >= 50 ? '#00ff00' : '#ff4444';
+    }
+    
+    const biggestWinElement = document.getElementById('sandboxBiggestWin');
+    if (biggestWinElement) {
+      biggestWinElement.textContent = `$${simulationResult.biggestWin.toFixed(2)}`;
+    }
+    
+    const biggestLossElement = document.getElementById('sandboxBiggestLoss');
+    if (biggestLossElement) {
+      const displayValue = `-$${simulationResult.biggestLoss.toFixed(2)}`;
+      biggestLossElement.textContent = displayValue;
+    }
+    
+    // Update output
+    const outputDiv = document.getElementById('sandboxOutput');
+    if (outputDiv) {
+      outputDiv.innerHTML = simulationResult.output;
+    }
     
     // Update info box to reflect current results
     updateSandboxInfo();
@@ -9041,47 +9072,6 @@ function runSandboxSimulation() {
   }, 100);
 }
 
-function displaySimulationResults(simulationResult) {
-  // Update sandbox state with simulation results
-  sandboxState.simulationData = simulationResult;
-  sandboxState.totalProfitLoss = simulationResult.totalPL;
-  sandboxState.wins = simulationResult.wins;
-  sandboxState.losses = simulationResult.losses;
-  sandboxState.biggestWin = simulationResult.biggestWin;
-  sandboxState.biggestLoss = simulationResult.biggestLoss;
-  
-  // Update UI elements
-  const totalPLElement = document.getElementById('sandboxTotalPL');
-  if (totalPLElement) {
-    const displayValue = simulationResult.totalPL >= 0 ? `+$${simulationResult.totalPL.toFixed(2)}` : `-$${Math.abs(simulationResult.totalPL).toFixed(2)}`;
-    totalPLElement.textContent = displayValue;
-    totalPLElement.style.color = simulationResult.totalPL >= 0 ? '#00ff00' : '#ff4444';
-  }
-  
-  const winRateElement = document.getElementById('sandboxWinRate');
-  if (winRateElement) {
-    const totalRounds = simulationResult.wins + simulationResult.losses;
-    const winRate = totalRounds > 0 ? (simulationResult.wins / totalRounds) * 100 : 0;
-    winRateElement.textContent = `${winRate.toFixed(1)}%`;
-    winRateElement.style.color = winRate >= 50 ? '#00ff00' : '#ff4444';
-  }
-  
-  const biggestWinElement = document.getElementById('sandboxBiggestWin');
-  if (biggestWinElement) {
-    biggestWinElement.textContent = `$${simulationResult.biggestWin.toFixed(2)}`;
-  }
-  
-  const biggestLossElement = document.getElementById('sandboxBiggestLoss');
-  if (biggestLossElement) {
-    biggestLossElement.textContent = `$${simulationResult.biggestLoss.toFixed(2)}`;
-  }
-  
-  // Update output
-  const outputDiv = document.getElementById('sandboxOutput');
-  if (outputDiv) {
-    outputDiv.innerHTML = simulationResult.output;
-  }
-}
 
 function resetSandboxSimulation() {
   // Clear the sandbox output
@@ -9880,7 +9870,7 @@ function simulateStrategies(strategies, results, baseBet) {
     const winRate = totalRounds > 0 ? (winningRounds / totalRounds) * 100 : 0;
     output += `<div>Win Rate: ${winRate.toFixed(1)}%</div>\n`;
     output += `<div>Biggest Win: $${biggestWin.toFixed(2)}</div>\n`;
-    output += `<div>Biggest Loss: $${biggestLoss.toFixed(2)}</div>\n`;
+    output += `<div>Biggest Loss: -$${biggestLoss.toFixed(2)}</div>\n`;
     
     output += '<div style="margin-top: 10px;">Strategy Results:</div>\n';
     strategyStates.forEach((strategy, index) => {
