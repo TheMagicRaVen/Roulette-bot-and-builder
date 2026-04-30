@@ -9030,6 +9030,9 @@ function runSandboxSimulation() {
   setTimeout(() => {
     const simulationResult = simulateStrategies(strategies, results, null);
     
+    // Update sandbox state so updateSandboxInfo can use the correct data
+    sandboxState.simulationData = simulationResult;
+    
     // Update UI elements directly
     const totalPLElement = document.getElementById('sandboxTotalPL');
     if (totalPLElement) {
