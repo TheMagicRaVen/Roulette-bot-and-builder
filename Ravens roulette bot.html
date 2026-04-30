@@ -8884,6 +8884,7 @@ function toggleSandboxVisibility() {
 }
 
 function updateSandboxInfo() {
+  console.log('updateSandboxInfo called!');
   const infoDiv = document.getElementById('sandboxInfo');
   
   if (!infoDiv) {
@@ -8894,22 +8895,45 @@ function updateSandboxInfo() {
   // Show loading message
   infoDiv.innerHTML = '<div>Loading strategy and results data...</div>';
   
-  // Get results from state (same as simulation)
-  const results = state.results || [];
-  const resultsCount = results.length;
+  // Get results count from actual simulation if available, otherwise from state
+  let resultsCount = 0;
+  if (sandboxState.simulationData && sandboxState.simulationData.actualSpinsProcessed) {
+    resultsCount = sandboxState.simulationData.actualSpinsProcessed;
+  } else {
+    // After reset, use current state results
+    resultsCount = (state.results || []).length;
+  }
   
-  // Calculate total amount from actual simulation bet amounts
+  // Calculate TOTAL amount bet across all spins in simulation
   let totalBetAmount = 0;
-  if (resultsCount >= 5) {
-    totalBetAmount = 3.30 + 3.30 + 3.30 + 6.00 + 18.00; // $33.90
-  } else if (resultsCount >= 4) {
-    totalBetAmount = 3.30 + 3.30 + 3.30 + 6.00; // $15.90
-  } else if (resultsCount >= 3) {
-    totalBetAmount = 3.30 + 3.30 + 3.30; // $9.90
-  } else if (resultsCount >= 2) {
-    totalBetAmount = 3.30 + 3.30; // $6.60
-  } else if (resultsCount >= 1) {
-    totalBetAmount = 3.30; // $3.30
+  if (sandboxState.simulationData && sandboxState.simulationData.totalBetAmount !== undefined) {
+    // Use actual total bet amount from simulation
+    totalBetAmount = sandboxState.simulationData.totalBetAmount;
+  } else if (sandboxState.simulationData === null) {
+    // After reset, show 0
+    totalBetAmount = 0;
+  } else {
+    // Fallback to calculation (before simulation runs)
+    try {
+      const strategies = state.strategies || [];
+      const activeStrategy = strategies.find(s => s.isActive) || strategies[0];
+      if (activeStrategy && activeStrategy.bets) {
+        let singleBetAmount = 0;
+        activeStrategy.bets.forEach(bet => {
+          if (bet.chips) {
+            bet.chips.forEach(chip => {
+              singleBetAmount += parseFloat(chip.value) || 0;
+            });
+          }
+        });
+        
+        // Total amount = single bet amount × number of results (spins)
+        totalBetAmount = singleBetAmount * resultsCount;
+      }
+    } catch (error) {
+      console.error('Error calculating total bet amount:', error);
+      totalBetAmount = 0;
+    }
   }
   
   // Get saved strategies count
@@ -8943,6 +8967,9 @@ function updateSandboxInfo() {
 }
 
 function runSandboxSimulation() {
+  // Update info before running simulation
+  updateSandboxInfo();
+  
   let simTrackers = savedStrategies.map(s => ({
     title: s.title,
     consecutiveLosses: 0,
@@ -8953,7 +8980,7 @@ function runSandboxSimulation() {
 
   if (sandboxState.isRunning) return;
   
-  // Get results from results container ONLY
+  // Get results from results container ONLY - use all results
   const results = state.results || [];
   
   if (results.length === 0) {
@@ -9014,6 +9041,48 @@ function runSandboxSimulation() {
   }, 100);
 }
 
+function displaySimulationResults(simulationResult) {
+  // Update sandbox state with simulation results
+  sandboxState.simulationData = simulationResult;
+  sandboxState.totalProfitLoss = simulationResult.totalPL;
+  sandboxState.wins = simulationResult.wins;
+  sandboxState.losses = simulationResult.losses;
+  sandboxState.biggestWin = simulationResult.biggestWin;
+  sandboxState.biggestLoss = simulationResult.biggestLoss;
+  
+  // Update UI elements
+  const totalPLElement = document.getElementById('sandboxTotalPL');
+  if (totalPLElement) {
+    const displayValue = simulationResult.totalPL >= 0 ? `+$${simulationResult.totalPL.toFixed(2)}` : `-$${Math.abs(simulationResult.totalPL).toFixed(2)}`;
+    totalPLElement.textContent = displayValue;
+    totalPLElement.style.color = simulationResult.totalPL >= 0 ? '#00ff00' : '#ff4444';
+  }
+  
+  const winRateElement = document.getElementById('sandboxWinRate');
+  if (winRateElement) {
+    const totalRounds = simulationResult.wins + simulationResult.losses;
+    const winRate = totalRounds > 0 ? (simulationResult.wins / totalRounds) * 100 : 0;
+    winRateElement.textContent = `${winRate.toFixed(1)}%`;
+    winRateElement.style.color = winRate >= 50 ? '#00ff00' : '#ff4444';
+  }
+  
+  const biggestWinElement = document.getElementById('sandboxBiggestWin');
+  if (biggestWinElement) {
+    biggestWinElement.textContent = `$${simulationResult.biggestWin.toFixed(2)}`;
+  }
+  
+  const biggestLossElement = document.getElementById('sandboxBiggestLoss');
+  if (biggestLossElement) {
+    biggestLossElement.textContent = `$${simulationResult.biggestLoss.toFixed(2)}`;
+  }
+  
+  // Update output
+  const outputDiv = document.getElementById('sandboxOutput');
+  if (outputDiv) {
+    outputDiv.innerHTML = simulationResult.output;
+  }
+}
+
 function resetSandboxSimulation() {
   // Clear the sandbox output
   const outputDiv = document.getElementById('sandboxOutput');
@@ -9023,6 +9092,35 @@ function resetSandboxSimulation() {
   
   // Reset sandbox state
   sandboxState.isRunning = false;
+  sandboxState.simulationData = null; // Clear to force refresh
+  sandboxState.totalProfitLoss = 0;
+  sandboxState.wins = 0;
+  sandboxState.losses = 0;
+  sandboxState.biggestWin = 0;
+  sandboxState.biggestLoss = 0;
+  
+  // Reset UI elements
+  const totalPLElement = document.getElementById('sandboxTotalPL');
+  if (totalPLElement) {
+    totalPLElement.textContent = '$0.00';
+    totalPLElement.style.color = '#00ff00';
+  }
+  
+  const winRateElement = document.getElementById('sandboxWinRate');
+  if (winRateElement) {
+    winRateElement.textContent = '0%';
+    winRateElement.style.color = '#00ff00';
+  }
+  
+  const biggestWinElement = document.getElementById('sandboxBiggestWin');
+  if (biggestWinElement) {
+    biggestWinElement.textContent = '$0.00';
+  }
+  
+  const biggestLossElement = document.getElementById('sandboxBiggestLoss');
+  if (biggestLossElement) {
+    biggestLossElement.textContent = '$0.00';
+  }
   
   // Update button text
   const btn = document.getElementById('startSandboxBtn');
@@ -9233,13 +9331,19 @@ function simulateStrategies(strategies, results, baseBet) {
     };
   });
   
-  // Simulate each spin - apply strategy actions and handle switching (reading from RIGHT to LEFT)
-  for (let i = results.length - 1; i >= 0; i--) {
-    const result = results[i];
-    const spinIndex = results.length - 1 - i; // Adjust spin index for display
-    if (spinIndex > 50) continue; // Limit to first 50 spins for performance
+  // Reverse results to show chronological order (oldest first)
+  const chronologicalResults = [...results].reverse();
+  
+  // Track actual spins processed and total bet amount
+  let actualSpinsProcessed = 0;
+  let totalBetAmount = 0;
+  
+  // Simulate each spin - apply strategy actions and handle switching (chronological order)
+  for (let i = 0; i < chronologicalResults.length; i++) {
+    const result = chronologicalResults[i];
+    const spinIndex = i + 1; // Show actual spin position (1-based)
     
-    output += `<div style="margin-top: 5px;"><strong>Spin ${spinIndex + 1}: ${result.num} (${result.color})</strong></div>\n`;
+    output += `<div style="margin-top: 5px;"><strong>Spin ${spinIndex}: ${result.num} (${result.color})</strong></div>\n`;
     
     let spinTotalPL = 0;
     let strategySwitchedThisRound = false; // Prevent multiple switches per round
@@ -9253,6 +9357,9 @@ function simulateStrategies(strategies, results, baseBet) {
     
     let strategyPL = 0;
     
+    // Calculate total bet amount for this spin
+    let spinBetAmount = 0;
+    
     // Check each bet in current strategy
     currentStrategy.currentBets.forEach(bet => {
       if (!bet.chips || bet.chips.length === 0) {
@@ -9264,21 +9371,37 @@ function simulateStrategies(strategies, results, baseBet) {
         return;
       }
       
+      // Add to spin bet amount
+      spinBetAmount += betAmount;
+      
       const won = checkBetWin(bet.square, result.num);
       
       if (won) {
-        const multiplier = getBetMultiplier(bet.square);
+        // Fix multiplier bug - low/high bets should pay 2:1
+        let multiplier = 1;
+        if (bet.square === 'low' || bet.square === 'high' || bet.square === 'even' || bet.square === 'odd' || bet.square === 'red' || bet.square === 'black') {
+          multiplier = 2;
+        } else if (bet.square === 'dozen-1' || bet.square === 'dozen-2' || bet.square === 'dozen-3' || bet.square === 'col-1' || bet.square === 'col-2' || bet.square === 'col-3') {
+          multiplier = 3;
+        } else {
+          multiplier = getBetMultiplier(bet.square);
+        }
+        
         const payout = betAmount * multiplier;
-        const profit = payout - betAmount;
+        const profit = Math.round((payout - betAmount) * 100) / 100;
+        
         strategyPL += profit;
+        output += `<div style="margin-left: 10px; color: #00ff00;">${bet.square}: +$${profit.toFixed(2)}</div>\n`;
       } else {
         strategyPL -= betAmount;
+        output += `<div style="margin-left: 10px; color: #ff4444;">${bet.square}: -$${betAmount.toFixed(2)}</div>\n`;
       }
     });
     
     // Update current strategy statistics
     currentStrategy.totalPL += strategyPL;
-    spinTotalPL += strategyPL;
+    spinTotalPL = Math.round((spinTotalPL + strategyPL) * 100) / 100;
+    totalPL += strategyPL;
     
     if (strategyPL > 0) {
       currentStrategy.wins++;
@@ -9290,17 +9413,8 @@ function simulateStrategies(strategies, results, baseBet) {
       currentStrategy.consecutiveWins = 0;
     }
     
-    // Show current strategy result
-    if (Math.abs(strategyPL) > 0.01) {
-      output += `<div style="margin-left: 20px; color: ${strategyPL >= 0 ? '#00ff00' : '#ff4444'};">`;
-      output += `${currentStrategy.title}: ${strategyPL >= 0 ? '+' : ''}$${strategyPL.toFixed(2)}</div>\n`;
-    }
-    
     // Apply actions and handle strategy switching
     if (strategyPL > 0) {
-      // Update consecutive counters
-      currentStrategy.consecutiveWins += 1;
-      currentStrategy.consecutiveLosses = 0;
       
       // Apply win actions
       currentStrategy.winActions.forEach(action => {
@@ -9367,18 +9481,187 @@ function simulateStrategies(strategies, results, baseBet) {
           }
         } else {
           // Apply other win actions (multiply, reset, etc.)
-          applyWinActions(currentStrategy);
+          const winActionResult = applyWinActions(currentStrategy);
+          if (winActionResult && winActionResult.stopSession) {
+            output += `<div style="margin-left: 20px; color: #ff4444;">→ Session stopped by win action</div>\n`;
+            addFinalSummary();
+            return {
+              output: output,
+              totalPL: totalPL,
+              wins: winningRounds,
+              losses: losingRounds,
+              biggestWin: biggestWin,
+              biggestLoss: biggestLoss,
+              strategyResults: strategyStates,
+              actualSpinsProcessed: actualSpinsProcessed,
+              totalBetAmount: totalBetAmount,
+              stopped: true
+            };
+          }
+        }
+      });
+    }
+    
+    // Update current statistics BEFORE actions are processed
+    currentStrategy.totalPL += strategyPL;
+    
+    // Track round results BEFORE actions are processed
+    if (spinTotalPL > 0) {
+      currentStrategy.wins++;
+      currentStrategy.consecutiveWins++;
+      currentStrategy.consecutiveLosses = 0;
+      winningRounds++;
+      if (spinTotalPL > biggestWin) biggestWin = spinTotalPL;
+    } else if (spinTotalPL < 0) {
+      currentStrategy.losses++;
+      currentStrategy.consecutiveLosses++;
+      currentStrategy.consecutiveWins = 0;
+      losingRounds++;
+      if (Math.abs(spinTotalPL) > biggestLoss) biggestLoss = Math.abs(spinTotalPL);
+    } else {
+      // Break even - reset consecutive counters
+      currentStrategy.consecutiveLosses = 0;
+      currentStrategy.consecutiveWins = 0;
+    }
+    
+    // Increment actual spins processed BEFORE checking session stop conditions
+    actualSpinsProcessed++;
+    
+    // Add this spin's bet amount to total
+    totalBetAmount += spinBetAmount;
+    
+    // Show spin total
+    if (Math.abs(spinTotalPL) > 0.01) {
+      output += `<div style="margin-left: 10px; font-weight: bold; color: ${spinTotalPL >= 0 ? '#00ff00' : '#ff4444'};">`;
+      output += `Round Total: ${spinTotalPL >= 0 ? '+' : ''}$${spinTotalPL.toFixed(2)}</div>\n`;
+    }
+    
+    let sessionStopped = false;
+    
+    if (strategyPL > 0) {
+      // Apply win actions
+      currentStrategy.winActions.forEach(action => {
+        // Handle nested actions like on_x_win
+        if (action.type === 'on_x_win' && action.params && action.params.action === 'switch to strategy' && action.nestedParams && action.nestedParams.action && action.nestedParams.action.targetStrategy) {
+          const winCount = action.params.winCount || 1;
+          if (currentStrategy.consecutiveWins >= winCount && !strategySwitchedThisRound) {
+            const targetStrategyName = action.nestedParams.action.targetStrategy;
+            const newStrategy = strategyStates.find(s => s.title === targetStrategyName);
+            if (newStrategy) {
+              // Deactivate current strategy
+              currentStrategy.isActive = false;
+              
+              // Activate new strategy
+              newStrategy.isActive = true;
+              currentStrategyId = newStrategy.id;
+              
+              // Apply multiplyAfterSwitch conditions on the newly activated strategy
+              const multiplyResult = applyMultiplyAfterSwitch(newStrategy);
+              if (multiplyResult && multiplyResult.applied) {
+                output += `<div style="margin-left: 20px; color: #FFA500;">→ Applied ${multiplyResult.multiplier}x multiplier on switch</div>\n`;
+              }
+
+              // Optionally multiply bets of the new strategy immediately after switch
+              if (action.params.multiplyAfterSwitch) {
+                const m = parseFloat(action.params.multiplyAfterSwitch);
+                if (!isNaN(m) && m > 0 && newStrategy.currentBets) {
+                  newStrategy.currentBets.forEach(bet => {
+                    if (bet.chips) {
+                      bet.chips.forEach(chip => {
+                        chip.value = (parseFloat(chip.value) || 1) * m;
+                      });
+                    }
+                  });
+                  output += `<div style="margin-left: 20px; color: #FFA500;">→ Applied ${m}x multiplier on switch</div>\n`;
+                }
+              }
+
+              output += `<div style="margin-left: 20px; color: #FFD700;">→ Switched to: ${newStrategy.title}</div>\n`;
+              strategySwitchedThisRound = true;
+            }
+          }
+        } else if (action.type === 'switch_to_strategy' && action.params && action.params.targetStrategy) {
+          if (!strategySwitchedThisRound) {
+            // Find strategy by title instead of ID
+            const newStrategy = strategyStates.find(s => s.title === action.params.targetStrategy);
+            if (newStrategy) {
+              // Deactivate current strategy
+              currentStrategy.isActive = false;
+              
+              // Activate new strategy
+              newStrategy.isActive = true;
+              currentStrategyId = newStrategy.id;
+              
+              // Reset consecutive counters for the new strategy
+              newStrategy.consecutiveLosses = 0;
+              newStrategy.consecutiveWins = 0;
+
+              // Apply multiplyAfterSwitch conditions on the newly activated strategy
+              const multiplyResult = applyMultiplyAfterSwitch(newStrategy);
+              if (multiplyResult && multiplyResult.applied) {
+                output += `<div style="margin-left: 20px; color: #FFA500;">→ Applied ${multiplyResult.multiplier}x multiplier on switch</div>\n`;
+              }
+
+              // Optionally multiply bets of the new strategy immediately after switch
+              if (action.params.multiplyAfterSwitch) {
+                const m = parseFloat(action.params.multiplyAfterSwitch);
+                if (!isNaN(m) && m > 0 && newStrategy.currentBets) {
+                  newStrategy.currentBets.forEach(bet => {
+                    if (bet.chips) {
+                      bet.chips.forEach(chip => {
+                        chip.value = (parseFloat(chip.value) || 1) * m;
+                      });
+                    }
+                  });
+                  output += `<div style="margin-left: 20px; color: #FFA500;">→ Applied ${m}x multiplier on switch</div>\n`;
+                }
+              }
+
+              output += `<div style="margin-left: 20px; color: #FF6347;">→ Switched to: ${newStrategy.title}</div>\n`;
+              strategySwitchedThisRound = true;
+            }
+          }
+        } else {
+          // Apply other win actions (multiply, reset, etc.)
+          const winActionResult = applyWinActions(currentStrategy);
+          if (winActionResult && winActionResult.stopSession) {
+            output += `<div style="margin-left: 20px; color: #ff4444;">→ Session stopped by win action</div>\n`;
+            addFinalSummary();
+            return {
+              output: output,
+              totalPL: totalPL,
+              wins: winningRounds,
+              losses: losingRounds,
+              biggestWin: biggestWin,
+              biggestLoss: biggestLoss,
+              strategyResults: strategyStates,
+              actualSpinsProcessed: actualSpinsProcessed,
+              totalBetAmount: totalBetAmount,
+              stopped: true
+            };
+          }
         }
       });
     } else if (strategyPL < 0) {
-      // Update consecutive counters
-      currentStrategy.consecutiveLosses += 1;
-      currentStrategy.consecutiveWins = 0;
-      
       // Apply loss actions
       currentStrategy.lossActions.forEach(action => {
         // Handle nested actions like on_x_loss
-        if (action.type === 'on_x_loss' && action.params && action.params.action === 'switch_to_strategy' && action.nestedParams && action.nestedParams.action && action.nestedParams.action.targetStrategy) {
+        if (action.type === 'on_x_loss' && action.params && action.params.action === 'stop session') {
+          const lossCount = action.params.lossCount || 1;
+          if (currentStrategy.consecutiveLosses >= lossCount) {
+            output += `<div style="margin-left: 20px; color: #ff4444;">→ Stop session triggered after ${lossCount} loss(es)</div>\n`;
+            sessionStopped = true;
+            return; // Exit forEach but not the main function
+          }
+        } else if (action.type === 'on_x_loss' && action.nestedParams && action.nestedParams.action && action.nestedParams.action.action === 'stop session') {
+          const lossCount = action.params.lossCount || 1;
+          if (currentStrategy.consecutiveLosses >= lossCount) {
+            output += `<div style="margin-left: 20px; color: #ff4444;">→ Stop session triggered after ${lossCount} loss(es)</div>\n`;
+            sessionStopped = true;
+            return; // Exit forEach but not the main function
+          }
+        } else if (action.type === 'on_x_loss' && action.params && action.params.action === 'switch_to_strategy' && action.nestedParams && action.nestedParams.action && action.nestedParams.action.targetStrategy) {
+          console.log('Checking switch to strategy action, consecutive losses:', currentStrategy.consecutiveLosses, 'lossCount:', action.params.lossCount);
           const lossCount = action.params.lossCount || 1;
           if (currentStrategy.consecutiveLosses >= lossCount && !strategySwitchedThisRound) {
             const targetStrategyName = action.nestedParams.action.targetStrategy;
@@ -9495,166 +9778,140 @@ function simulateStrategies(strategies, results, baseBet) {
           }
         } else {
           // Apply other loss actions (multiply, increase, etc.)
-          applyLossActions(currentStrategy);
-        }
-      });
-    } else {
-      // Break even - reset consecutive counters
-      currentStrategy.consecutiveLosses = 0;
-      currentStrategy.consecutiveWins = 0;
-    }
-    
-    // Evaluate profit conditions (on_profit_reached, on_loss_reached, on_balance_reached)
-    const allActions = [...currentStrategy.winActions, ...currentStrategy.lossActions, ...(currentStrategy.betActions || [])];
-    
-        
-    allActions.forEach(action => {
-      if (action.type === 'on_profit_reached' || action.type === 'on_loss_reached' || action.type === 'on_balance_reached') {
-        const targetAmount = action.params.amount || 0;
-        const comparison = action.params.comparison || 'greaterThan';
-        let currentValue = 0;
-        
-        if (action.type === 'on_profit_reached') {
-          currentValue = currentStrategy.totalPL;
-        } else if (action.type === 'on_loss_reached') {
-          currentValue = Math.abs(currentStrategy.totalPL);
-        } else if (action.type === 'on_balance_reached') {
-          currentValue = totalPL; // Use session total P/L for balance conditions
-        }
-        
-        let conditionMet = false;
-        switch (comparison) {
-          case 'greaterThan':
-            conditionMet = currentValue > targetAmount;
-            break;
-          case 'lowerThan':
-            conditionMet = currentValue < targetAmount;
-            break;
-          case 'greaterThanOrEqualTo':
-            conditionMet = currentValue >= targetAmount;
-            break;
-          case 'lowerThanOrEqualTo':
-            conditionMet = currentValue <= targetAmount;
-            break;
-          case 'equalTo':
-            conditionMet = currentValue === targetAmount;
-            break;
-        }
-        
-        if (conditionMet && !strategySwitchedThisRound) {
-          // Apply the nested action
-          const nestedAction = action.nestedParams?.action;
-          if (nestedAction) {
-            if (nestedAction.action === 'switch_to_strategy' && nestedAction.targetStrategy) {
-              const newStrategy = strategyStates.find(s => s.title === nestedAction.targetStrategy);
-              if (newStrategy) {
-                currentStrategy.isActive = false;
-                newStrategy.isActive = true;
-                currentStrategyId = newStrategy.id;
-                
-                const multiplyResult = applyMultiplyAfterSwitch(newStrategy);
-                if (multiplyResult && multiplyResult.applied) {
-                  output += `<div style="margin-left: 20px; color: #FFA500;">-> Applied ${multiplyResult.multiplier}x multiplier on switch</div>\n`;
-                }
-                
-                output += `<div style="margin-left: 20px; color: #FFD700;">-> ${action.type.replace('on_', '').replace('_', ' ').toUpperCase()} $${targetAmount.toFixed(2)}: Switched to ${newStrategy.title}</div>\n`;
-                strategySwitchedThisRound = true;
-              }
-            } else if (nestedAction.action === 'multiply current bet' && nestedAction.multiplier) {
-              const multiplier = nestedAction.multiplier;
-              currentStrategy.currentBets.forEach(bet => {
-                if (bet.chips) {
-                  bet.chips.forEach(chip => {
-                    chip.value = (parseFloat(chip.value) || 1) * multiplier;
-                  });
-                }
-              });
-              output += `<div style="margin-left: 20px; color: #FFA500;">-> ${action.type.replace('on_', '').replace('_', ' ').toUpperCase()} $${targetAmount.toFixed(2)}: Multiplied bets by ${multiplier}x</div>\n`;
-            } else if (nestedAction.action === 'reset to base') {
-              currentStrategy.currentBets = JSON.parse(JSON.stringify(currentStrategy.originalBets));
-              output += `<div style="margin-left: 20px; color: #00BFFF;">-> ${action.type.replace('on_', '').replace('_', ' ').toUpperCase()} $${targetAmount.toFixed(2)}: Reset to base bets</div>\n`;
-            } else if (nestedAction.action === 'stop strategy') {
-              output += `<div style="margin-left: 20px; color: #ff4444;">-> ${action.type.replace('on_', '').replace('_', ' ').toUpperCase()} $${targetAmount.toFixed(2)}: Strategy stopped</div>\n`;
-              return; // Exit early for this strategy
-            } else if (nestedAction.action === 'stop session') {
-              output += `<div style="margin-left: 20px; color: #ff4444;">-> ${action.type.replace('on_', '').replace('_', ' ').toUpperCase()} $${targetAmount.toFixed(2)}: Session stopped</div>\n`;
-              return; // Exit simulation early
-            }
+          const lossActionResult = applyLossActions(currentStrategy);
+          if (lossActionResult && lossActionResult.stopSession) {
+            output += `<div style="margin-left: 20px; color: #ff4444;">→ Session stopped by loss action</div>\n`;
+            addFinalSummary();
+            return {
+              output: output,
+              totalPL: totalPL,
+              wins: winningRounds,
+              losses: losingRounds,
+              biggestWin: biggestWin,
+              biggestLoss: biggestLoss,
+              strategyResults: strategyStates,
+              actualSpinsProcessed: actualSpinsProcessed,
+              totalBetAmount: totalBetAmount,
+              stopped: true
+            };
           }
         }
-      }
-    });
+      });
+    }
     
     // Apply bet actions (on_every_bet, every_streak_of_bets, etc.)
     if (currentStrategy.betActions && currentStrategy.betActions.length > 0) {
       currentStrategy.betActions.forEach(action => {
         if (action.type === 'on_every_bet') {
           // Apply action on every bet/spin
-          applyBetAction(currentStrategy, action, output);
+          const betActionResult = applyBetAction(currentStrategy, action, output);
+          if (betActionResult && betActionResult.stopSession) {
+            output += `<div style="margin-left: 20px; color: #ff4444;">→ Session stopped by bet action</div>\n`;
+            addFinalSummary();
+            return {
+              output: output,
+              totalPL: totalPL,
+              wins: winningRounds,
+              losses: losingRounds,
+              biggestWin: biggestWin,
+              biggestLoss: biggestLoss,
+              strategyResults: strategyStates,
+              actualSpinsProcessed: actualSpinsProcessed,
+              totalBetAmount: totalBetAmount,
+              stopped: true
+            };
+          }
         } else if (action.type === 'every_streak_of_bets') {
           const streakLength = action.params.count || 1;
           if ((currentStrategy.wins + currentStrategy.losses) % streakLength === 0) {
-            applyBetAction(currentStrategy, action, output);
+            const betActionResult = applyBetAction(currentStrategy, action, output);
+            if (betActionResult && betActionResult.stopSession) {
+              output += `<div style="margin-left: 20px; color: #ff4444;">→ Session stopped by bet action</div>\n`;
+              addFinalSummary();
+              return {
+                output: output,
+                totalPL: totalPL,
+                wins: winningRounds,
+                losses: losingRounds,
+                biggestWin: biggestWin,
+                biggestLoss: biggestLoss,
+                strategyResults: strategyStates,
+                actualSpinsProcessed: actualSpinsProcessed,
+                totalBetAmount: totalBetAmount,
+                stopped: true
+              };
+            }
           }
         }
         // Add other bet action types as needed
       });
     }
     
-    // Track round results
-    if (spinTotalPL > 0) {
-      winningRounds++;
-      if (spinTotalPL > biggestWin) biggestWin = spinTotalPL;
-    } else if (spinTotalPL < 0) {
-      losingRounds++;
-      if (Math.abs(spinTotalPL) > biggestLoss) biggestLoss = Math.abs(spinTotalPL);
+    // Check session stop conditions AFTER statistics are updated
+    if (sessionStopped) {
+      output += `<div style="margin-left: 20px; color: #ff4444;">→ Session stopped by loss condition</div>\n`;
+      addFinalSummary();
+      return {
+        output: output,
+        totalPL: Math.round(totalPL * 100) / 100,
+        wins: winningRounds,
+        losses: losingRounds,
+        biggestWin: Math.round(biggestWin * 100) / 100,
+        biggestLoss: Math.round(biggestLoss * 100) / 100,
+        strategyResults: strategyStates,
+        actualSpinsProcessed: actualSpinsProcessed,
+        totalBetAmount: totalBetAmount,
+        stopped: true
+      };
     }
     
-    totalPL += spinTotalPL;
-    
-    // Show spin total
-    if (Math.abs(spinTotalPL) > 0.01) {
-      output += `<div style="margin-left: 10px; font-weight: bold; color: ${spinTotalPL >= 0 ? '#00ff00' : '#ff4444'};">`;
-      output += `Round Total: ${spinTotalPL >= 0 ? '+' : ''}$${spinTotalPL.toFixed(2)}</div>\n`;
-    }
+    // Update total P/L only when session continues normally
+    totalPL = Math.round(totalPL * 100) / 100;
   }
   
-  // Final summary
-  output += '<div style="margin-top: 10px;">' + '='.repeat(30) + '</div>\n';
-  output += '<div style="color: #00ff00; font-weight: bold;">SIMULATION COMPLETE</div>\n';
-  output += `<div>Total P/L: ${totalPL >= 0 ? '+' : ''}$${totalPL.toFixed(2)}</div>\n`;
-  output += `<div>Total Rounds: ${Math.min(results.length, 51)}</div>\n`;
-  output += `<div>Winning Rounds: ${winningRounds} | Losing Rounds: ${losingRounds}</div>\n`;
-  const totalRounds = winningRounds + losingRounds;
-  const winRate = totalRounds > 0 ? (winningRounds / totalRounds) * 100 : 0;
-  output += `<div>Win Rate: ${winRate.toFixed(1)}%</div>\n`;
-  output += `<div>Biggest Win: $${biggestWin.toFixed(2)}</div>\n`;
-  output += `<div>Biggest Loss: $${biggestLoss.toFixed(2)}</div>\n`;
+  // Create final summary function
+  function addFinalSummary() {
+    output += '<div style="margin-top: 10px;">' + '='.repeat(30) + '</div>\n';
+    output += '<div style="color: #00ff00; font-weight: bold;">SIMULATION COMPLETE</div>\n';
+    output += `<div>Total P/L: ${totalPL >= 0 ? '+' : ''}$${totalPL.toFixed(2)}</div>\n`;
+    output += `<div>Total Rounds: ${actualSpinsProcessed}</div>\n`;
+    output += `<div>Winning Rounds: ${winningRounds} | Losing Rounds: ${losingRounds}</div>\n`;
+    const totalRounds = winningRounds + losingRounds;
+    const winRate = totalRounds > 0 ? (winningRounds / totalRounds) * 100 : 0;
+    output += `<div>Win Rate: ${winRate.toFixed(1)}%</div>\n`;
+    output += `<div>Biggest Win: $${biggestWin.toFixed(2)}</div>\n`;
+    output += `<div>Biggest Loss: $${biggestLoss.toFixed(2)}</div>\n`;
+    
+    output += '<div style="margin-top: 10px;">Strategy Results:</div>\n';
+    strategyStates.forEach((strategy, index) => {
+      const strategyTotalRounds = strategy.wins + strategy.losses;
+      const avgWinLoss = strategyTotalRounds > 0 ? (strategy.totalPL / strategyTotalRounds) : 0;
+      output += `<div style="margin-left: 10px; color: ${strategy.totalPL >= 0 ? '#00ff00' : '#ff4444'};">`;
+      output += `<strong>${strategy.title || 'Strategy ' + (index + 1)}:</strong> ${strategy.totalPL >= 0 ? '+' : ''}$${strategy.totalPL.toFixed(2)} `;
+      output += `(W: ${strategy.wins}, L: ${strategy.losses}, Avg: ${avgWinLoss >= 0 ? '+' : ''}$${avgWinLoss.toFixed(2)})</div>\n`;
+    });
+  }
   
-  output += '<div style="margin-top: 10px;">Strategy Results:</div>\n';
-  strategyStates.forEach((strategy, index) => {
-    const strategyTotalRounds = strategy.wins + strategy.losses;
-    const avgWinLoss = strategyTotalRounds > 0 ? (strategy.totalPL / strategyTotalRounds) : 0;
-    output += `<div style="margin-left: 10px; color: ${strategy.totalPL >= 0 ? '#00ff00' : '#ff4444'};">`;
-    output += `<strong>${strategy.title || 'Strategy ' + (index + 1)}:</strong> ${strategy.totalPL >= 0 ? '+' : ''}$${strategy.totalPL.toFixed(2)} `;
-    output += `(W: ${strategy.wins}, L: ${strategy.losses}, Avg: ${avgWinLoss >= 0 ? '+' : ''}$${avgWinLoss.toFixed(2)})</div>\n`;
-  });
+  // Add final summary only for normal completion (no early stop)
+  addFinalSummary();
   
   return {
     output: output,
-    totalPL: totalPL,
+    totalPL: Math.round(totalPL * 100) / 100,
     wins: winningRounds,
     losses: losingRounds,
-    biggestWin: biggestWin,
-    biggestLoss: biggestLoss,
-    strategyResults: strategyStates
+    biggestWin: Math.round(biggestWin * 100) / 100,
+    biggestLoss: Math.round(biggestLoss * 100) / 100,
+    strategyResults: strategyStates,
+    actualSpinsProcessed: actualSpinsProcessed,
+    totalBetAmount: totalBetAmount
   };
 }
 
 function applyWinActions(strategy) {
   if (!strategy.winActions || strategy.winActions.length === 0) return;
   
-  strategy.winActions.forEach(action => {
+  for (const action of strategy.winActions) {
     switch (action.type) {
       case 'reset_to_base':
         // Reset to original bets
@@ -9693,9 +9950,17 @@ function applyWinActions(strategy) {
           });
         }
         break;
+      case 'stop session':
+        // Return a special signal to stop the simulation
+        return { stopSession: true };
+      default:
+        // Check if this is a nested action with stop session
+        if (action.nestedParams && action.nestedParams.action && action.nestedParams.action.action === 'stop session') {
+          return { stopSession: true };
+        }
       // Add more win actions as needed
     }
-  });
+  }
 }
 
 function applyBetAction(strategy, action, output) {
@@ -9738,13 +10003,16 @@ function applyBetAction(strategy, action, output) {
   } else if (nestedAction.action === 'switch_to_strategy' && nestedAction.targetStrategy) {
     // This would need access to strategyStates, so skip for now
     output += `<div style="margin-left: 20px; color: #FFD700;">-> Bet action: Strategy switch requested</div>\n`;
+  } else if (nestedAction.action === 'stop session') {
+    output += `<div style="margin-left: 20px; color: #ff4444;">-> Bet action: Session stopped</div>\n`;
+    return { stopSession: true };
   }
 }
 
 function applyLossActions(strategy) {
   if (!strategy.lossActions || strategy.lossActions.length === 0) return;
   
-  strategy.lossActions.forEach(action => {
+  for (const action of strategy.lossActions) {
     switch (action.type) {
       case 'on_x_loss':
         if (action.params && action.params.multiplier) {
@@ -9790,9 +10058,17 @@ function applyLossActions(strategy) {
           });
         }
         break;
+      case 'stop session':
+        // Return a special signal to stop the simulation
+        return { stopSession: true };
+      default:
+        // Check if this is a nested action with stop session
+        if (action.nestedParams && action.nestedParams.action && action.nestedParams.action.action === 'stop session') {
+          return { stopSession: true };
+        }
       // Add more loss actions as needed
     }
-  });
+  }
 }
 
 // Handle multiplyAfterSwitch conditions when strategy is activated
@@ -9838,6 +10114,9 @@ function displaySimulationResults(result) {
   document.getElementById('sandboxBiggestLoss').textContent = `$${result.biggestLoss.toFixed(2)}`;
   
   sandboxState.simulationData = result;
+  
+  // Update sandbox info to refresh total amount with actual spins processed
+  updateSandboxInfo();
 }
 
 // Disclaimer popup functionality
