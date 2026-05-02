@@ -7590,34 +7590,27 @@ function importResultsData(event) {
     const file = event.target.files[0];
     if (!file) return;
     
-    console.log('Importing file:', file.name, 'Size:', file.size, 'Type:', file.type);
-    
+        
     const reader = new FileReader();
     reader.onload = function(e) {
         try {
             const fileExtension = file.name.split('.').pop().toLowerCase();
             const content = e.target.result.trim();
-            console.log('File extension detected:', fileExtension);
-            console.log('File name:', file.name);
-            console.log('File content preview:', content.substring(0, 200));
-            
+                        
             let results;
             
             // Force CSV detection if file extension is csv
             if (fileExtension === 'csv') {
-                console.log('File extension is CSV, processing as CSV...');
-                // Handle CSV files
+                                // Handle CSV files
                 results = parseCSVResults(content);
             }
             // Try to detect if it's CSV by checking if content starts with header
             else if (content.startsWith('num,') || content.startsWith('"num"')) {
-                console.log('Content starts with CSV header, processing as CSV...');
-                // Handle CSV files
+                                // Handle CSV files
                 results = parseCSVResults(content);
             }
             else if (content.startsWith('[') || content.startsWith('{')) {
-                console.log('Content starts with JSON marker, processing as JSON...');
-                // Handle JSON files
+                                // Handle JSON files
                 const data = JSON.parse(content);
                 
                 // Handle different data formats
@@ -7637,8 +7630,7 @@ function importResultsData(event) {
                 }
             }
             else {
-                console.log('Unknown file format, defaulting to CSV...');
-                // Default to CSV processing for safety
+                                // Default to CSV processing for safety
                 results = parseCSVResults(content);
             }
             
@@ -7801,7 +7793,7 @@ document.addEventListener('DOMContentLoaded', initContainers);
         requires: ['lossCount', 'action'],
         fields: [
           { name: 'lossCount', type: 'number', label: 'After # losses:', placeholder: '3', min: 1 },
-          { name: 'action', type: 'select', label: 'Then perform:', options: ['multiply_current_bet', 'reset_to_base', 'switch_to_strategy', 'increase_units_to_losing_bet', 'increase_units_to_current_bet', 'increase_units_to_winning_bet', 'decrease_units_to_losing_bet', 'decrease_units_to_winning_bet', 'decrease_units_to_current_bet', 'winning_all_bets_reset', 'start_after_losses', 'after_x_losses_in_row', 'restart strategy', 'stop strategy'] }
+          { name: 'action', type: 'select', label: 'Then perform:', options: ['multiply_current_bet', 'reset_to_base', 'switch_to_strategy', 'increase_units_to_losing_bet', 'increase_units_to_current_bet', 'increase_units_to_winning_bet', 'decrease_units_to_losing_bet', 'decrease_units_to_winning_bet', 'decrease_units_to_current_bet', 'winning_all_bets_reset', 'start_after_losses', 'after_x_losses_in_row', 'restart strategy', 'stop strategy', 'reset_after_switch'] }
         ]
       },
       on_x_win: {
@@ -8050,7 +8042,8 @@ function convertLegacyActionToCondition(action, type, index) {
     'stop strategy': 'stopStrategy',
     'stop session': 'stopSession',
     'restart strategy': 'restartSession',
-    'start current strategy': 'startCurrentStrategy'
+    'start current strategy': 'startCurrentStrategy',
+    'reset after switch': 'resetAfterSwitch'
   };
 
   if (nestedAction) {
@@ -8165,6 +8158,18 @@ function renderConditionBlock(condition, conditionNumber) {
   `;
   
   container.insertAdjacentHTML('beforeend', conditionHTML);
+}
+
+// Apply reset after switch condition
+function applyResetAfterSwitch(strategy) {
+  if (!strategy.originalBets || !Array.isArray(strategy.originalBets)) {
+    return { applied: false };
+  }
+  
+  // Reset current bets to original bets
+  strategy.currentBets = JSON.parse(JSON.stringify(strategy.originalBets));
+  
+  return { applied: true };
 }
 
 // Render expanded condition
@@ -9030,8 +9035,16 @@ function runSandboxSimulation() {
   setTimeout(() => {
     const simulationResult = simulateStrategies(strategies, results, null);
     
-    // Update sandbox state so updateSandboxInfo can use the correct data
+    // Update sandbox state with simulation results so strategy conditions and bet modifications are preserved
     sandboxState.simulationData = simulationResult;
+    sandboxState.totalProfitLoss = simulationResult.totalPL;
+    sandboxState.wins = simulationResult.wins;
+    sandboxState.losses = simulationResult.losses;
+    sandboxState.biggestWin = simulationResult.biggestWin;
+    sandboxState.biggestLoss = simulationResult.biggestLoss;
+    
+    // Note: We don't save the modified bets back to localStorage to preserve original bet amounts
+    // The simulation uses temporary bet modifications that shouldn't persist permanently
     
     // Update UI elements directly
     const totalPLElement = document.getElementById('sandboxTotalPL');
@@ -9340,9 +9353,15 @@ function simulateStrategies(strategies, results, baseBet) {
     
     let spinTotalPL = 0;
     let strategySwitchedThisRound = false; // Prevent multiple switches per round
+    let unitIncreaseAppliedThisRound = false; // Prevent multiple unit increases per round
+    let multiplyAppliedThisRound = false; // Prevent multiple multiplies per round
     
     // Only process: CURRENT strategy
     const currentStrategy = strategyStates.find(s => s.id === currentStrategyId);
+    if (currentStrategy) {
+      // Reset triggered conditions for this round
+      currentStrategy.triggeredConditions = new Set();
+    }
     if (!currentStrategy) {
       output += `<div style="margin-left: 10px; color: #888;">No active strategy</div>\n`;
       return;
@@ -9350,6 +9369,7 @@ function simulateStrategies(strategies, results, baseBet) {
     
     let strategyPL = 0;
     
+        
     // Calculate total bet amount for this spin
     let spinBetAmount = 0;
     
@@ -9431,7 +9451,23 @@ function simulateStrategies(strategies, results, baseBet) {
                 output += `<div style="margin-left: 20px; color: #FFA500;">→ Applied ${multiplyResult.multiplier}x multiplier on switch</div>\n`;
               }
               
-              output += `<div style="margin-left: 20px; color: #FFD700;">→ Switched to: ${newStrategy.title}</div>\n`;
+              // Reset bets to original values when switching strategies - BULLETPROOF METHOD
+              // Create completely new bet objects from scratch - no sharing possible
+              newStrategy.currentBets = [];
+              newStrategy.originalBets.forEach(originalBet => {
+                const newBet = {
+                  square: originalBet.square,
+                  chips: []
+                };
+                originalBet.chips.forEach(originalChip => {
+                  newBet.chips.push({
+                    value: parseFloat(originalChip.value) || 1
+                  });
+                });
+                newStrategy.currentBets.push(newBet);
+              });
+
+                            output += `<div style="margin-left: 20px; color: #FFD700;">→ Switched to: ${newStrategy.title}</div>\n`;
               strategySwitchedThisRound = true;
             }
           }
@@ -9447,11 +9483,25 @@ function simulateStrategies(strategies, results, baseBet) {
               newStrategy.isActive = true;
               currentStrategyId = newStrategy.id;
               
-              // Apply multiplyAfterSwitch conditions on the newly activated strategy
-              const multiplyResult = applyMultiplyAfterSwitch(newStrategy);
-              if (multiplyResult && multiplyResult.applied) {
-                output += `<div style="margin-left: 20px; color: #FFA500;">→ Applied ${multiplyResult.multiplier}x multiplier on switch</div>\n`;
-              }
+              // Reset consecutive counters for the new strategy
+              newStrategy.consecutiveLosses = 0;
+              newStrategy.consecutiveWins = 0;
+              
+              // Reset bets to original values when switching strategies - BULLETPROOF METHOD
+              // Create completely new bet objects from scratch - no sharing possible
+              newStrategy.currentBets = [];
+              newStrategy.originalBets.forEach(originalBet => {
+                const newBet = {
+                  square: originalBet.square,
+                  chips: []
+                };
+                originalBet.chips.forEach(originalChip => {
+                  newBet.chips.push({
+                    value: parseFloat(originalChip.value) || 1
+                  });
+                });
+                newStrategy.currentBets.push(newBet);
+              });
 
               // Optionally multiply bets of the new strategy immediately after switch
               if (action.params.multiplyAfterSwitch) {
@@ -9468,7 +9518,8 @@ function simulateStrategies(strategies, results, baseBet) {
                 }
               }
 
-              output += `<div style="margin-left: 20px; color: #FFD700;">→ Switched to: ${newStrategy.title}</div>\n`;
+              
+                            output += `<div style="margin-left: 20px; color: #FFD700;">→ Switched to: ${newStrategy.title}</div>\n`;
               strategySwitchedThisRound = true;
             }
           }
@@ -9569,7 +9620,24 @@ function simulateStrategies(strategies, results, baseBet) {
                 }
               }
 
-              output += `<div style="margin-left: 20px; color: #FFD700;">→ Switched to: ${newStrategy.title}</div>\n`;
+              // Reset bets to original values when switching strategies - BULLETPROOF METHOD
+              // Create completely new bet objects from scratch - no sharing possible
+              newStrategy.currentBets = [];
+              newStrategy.originalBets.forEach(originalBet => {
+                const newBet = {
+                  square: originalBet.square,
+                  chips: []
+                };
+                originalBet.chips.forEach(originalChip => {
+                  newBet.chips.push({
+                    value: parseFloat(originalChip.value) || 1
+                  });
+                });
+                newStrategy.currentBets.push(newBet);
+              });
+              
+              
+                            output += `<div style="margin-left: 20px; color: #FFD700;">→ Switched to: ${newStrategy.title}</div>\n`;
               strategySwitchedThisRound = true;
             }
           }
@@ -9588,6 +9656,9 @@ function simulateStrategies(strategies, results, baseBet) {
               // Reset consecutive counters for the new strategy
               newStrategy.consecutiveLosses = 0;
               newStrategy.consecutiveWins = 0;
+              
+              // Reset bets to original values when switching strategies
+              newStrategy.currentBets = JSON.parse(JSON.stringify(newStrategy.originalBets));
 
               // Apply multiplyAfterSwitch conditions on the newly activated strategy
               const multiplyResult = applyMultiplyAfterSwitch(newStrategy);
@@ -9637,7 +9708,7 @@ function simulateStrategies(strategies, results, baseBet) {
       });
     } else if (strategyPL < 0) {
       // Apply loss actions
-      currentStrategy.lossActions.forEach(action => {
+            currentStrategy.lossActions.forEach(action => {
         // Handle nested actions like on_x_loss
         if (action.type === 'on_x_loss' && action.params && action.params.action === 'stop session') {
           const lossCount = action.params.lossCount || 1;
@@ -9654,8 +9725,7 @@ function simulateStrategies(strategies, results, baseBet) {
             return; // Exit forEach but not the main function
           }
         } else if (action.type === 'on_x_loss' && action.params && action.params.action === 'switch_to_strategy' && action.nestedParams && action.nestedParams.action && action.nestedParams.action.targetStrategy) {
-          console.log('Checking switch to strategy action, consecutive losses:', currentStrategy.consecutiveLosses, 'lossCount:', action.params.lossCount);
-          const lossCount = action.params.lossCount || 1;
+                    const lossCount = action.params.lossCount || 1;
           if (currentStrategy.consecutiveLosses >= lossCount && !strategySwitchedThisRound) {
             const targetStrategyName = action.nestedParams.action.targetStrategy;
             const newStrategy = strategyStates.find(s => s.title === targetStrategyName);
@@ -9677,6 +9747,12 @@ function simulateStrategies(strategies, results, baseBet) {
               newStrategy.consecutiveLosses = 0;
               newStrategy.consecutiveWins = 0;
               
+              // Apply resetAfterSwitch conditions on the newly activated strategy
+              const resetResult = applyResetAfterSwitch(newStrategy);
+              if (resetResult && resetResult.applied) {
+                output += `<div style="margin-left: 20px; color: #FFA500;">→ Reset to base bet on switch</div>\n`;
+              }
+              
               output += `<div style="margin-left: 20px; color: #FF6347;">→ Switched to: ${newStrategy.title}</div>\n`;
               strategySwitchedThisRound = true;
             }
@@ -9694,6 +9770,26 @@ function simulateStrategies(strategies, results, baseBet) {
               newStrategy.isActive = true;
               currentStrategyId = newStrategy.id;
               
+              // Reset consecutive counters for the new strategy
+              newStrategy.consecutiveLosses = 0;
+              newStrategy.consecutiveWins = 0;
+              
+              // Reset bets to original values when switching strategies - BULLETPROOF METHOD
+              // Create completely new bet objects from scratch - no sharing possible
+              newStrategy.currentBets = [];
+              newStrategy.originalBets.forEach(originalBet => {
+                const newBet = {
+                  square: originalBet.square,
+                  chips: []
+                };
+                originalBet.chips.forEach(originalChip => {
+                  newBet.chips.push({
+                    value: parseFloat(originalChip.value) || 1
+                  });
+                });
+                newStrategy.currentBets.push(newBet);
+              });
+
               // Apply multiplyAfterSwitch conditions on the newly activated strategy
               const multiplyResult = applyMultiplyAfterSwitch(newStrategy);
               if (multiplyResult && multiplyResult.applied) {
@@ -9704,27 +9800,40 @@ function simulateStrategies(strategies, results, baseBet) {
               newStrategy.consecutiveLosses = 0;
               newStrategy.consecutiveWins = 0;
               
-              output += `<div style="margin-left: 20px; color: #FF6347;">-> Switched to: ${newStrategy.title}</div>\n`;
+              
+                            output += `<div style="margin-left: 20px; color: #FF6347;">-> Switched to: ${newStrategy.title}</div>\n`;
               strategySwitchedThisRound = true;
             }
           }
-        } else if (action.type === 'on_x_loss' && action.params && action.params.action === 'multiply_current_bet' && action.nestedParams && action.nestedParams.action && action.nestedParams.action.multiplier) {
+        } else if (action.type === 'on_x_loss' && action.params && action.params.action === 'multiply current bet' && action.params && action.params.multiplier) {
           const lossCount = action.params.lossCount || 1;
           if (currentStrategy.consecutiveLosses >= lossCount) {
-            const multiplier = action.nestedParams.action.multiplier;
-            currentStrategy.currentBets.forEach(bet => {
+            // Prevent ANY multiply from being applied more than once per round
+            if (multiplyAppliedThisRound) {
+                            return; // Skip if multiply already applied this round
+            }
+            multiplyAppliedThisRound = true;
+            
+            const multiplier = action.params.multiplier;
+                        currentStrategy.currentBets.forEach(bet => {
               if (bet.chips) {
                 bet.chips.forEach(chip => {
                   chip.value = (parseFloat(chip.value) || 1) * multiplier;
                 });
               }
             });
-            output += `<div style="margin-left: 20px; color: #FFA500;">→ Multiplied bets by ${multiplier}x</div>\n`;
+                        output += `<div style="margin-left: 20px; color: #FFA500;">→ Multiplied bets by ${multiplier}x</div>\n`;
           }
-        } else if (action.type === 'on_x_loss' && action.params && action.params.action === 'increase_units_to_current_bet' && action.nestedParams && action.nestedParams.action && action.nestedParams.action.units) {
+        } else if (action.type === 'on_x_loss' && action.params && action.params.action === 'increase # unit on current bet' && action.params && action.params.units) {
           const lossCount = action.params.lossCount || 1;
           if (currentStrategy.consecutiveLosses >= lossCount) {
-            const units = action.nestedParams.action.units;
+            // Prevent ANY unit increase from being applied more than once per round
+            if (unitIncreaseAppliedThisRound) {
+              return; // Skip if unit increase already applied this round
+            }
+            unitIncreaseAppliedThisRound = true;
+            
+            const units = action.params.units;
             currentStrategy.currentBets.forEach(bet => {
               if (bet.chips) {
                 bet.chips.forEach(chip => {
@@ -9941,6 +10050,41 @@ function applyWinActions(strategy) {
               });
             }
           });
+        }
+        break;
+      case 'switch_to_strategy':
+        if (action.params && action.params.targetStrategy) {
+          // Find the target strategy by title
+          const targetStrategyName = action.params.targetStrategy;
+          const newStrategy = strategyStates.find(s => s.title === targetStrategyName);
+          if (newStrategy) {
+            // Deactivate current strategy
+            strategy.isActive = false;
+            
+            // Activate new strategy
+            newStrategy.isActive = true;
+            currentStrategyId = newStrategy.id;
+            
+            // Reset consecutive counters for the new strategy
+            newStrategy.consecutiveLosses = 0;
+            newStrategy.consecutiveWins = 0;
+            
+            // Reset bets to original values when switching strategies - BULLETPROOF METHOD
+            // Create completely new bet objects from scratch - no sharing possible
+            newStrategy.currentBets = [];
+            newStrategy.originalBets.forEach(originalBet => {
+              const newBet = {
+                square: originalBet.square,
+                chips: []
+              };
+              originalBet.chips.forEach(originalChip => {
+                newBet.chips.push({
+                  value: parseFloat(originalChip.value) || 1
+                });
+              });
+              newStrategy.currentBets.push(newBet);
+            });
+          }
         }
         break;
       case 'stop session':
